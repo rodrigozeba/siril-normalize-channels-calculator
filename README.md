@@ -28,6 +28,7 @@ A PyQt6 Python script for Siril that estimates narrowband SHO channel weights us
 5. Adjust formulas if needed. (Suported operations: med() median() mean() min() max() abs() sqrt() log() log10() asinh() clip())
 6. Click Apply.
 7. The script creates `normalized_SHO_result.fit`.
+8. Use the Zoom tools to zoom in and out, fit to preview, scale 1:1 and pan
 
 ## Notes
 

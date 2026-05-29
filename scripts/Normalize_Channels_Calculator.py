@@ -1,7 +1,13 @@
 # Normalize Channels Calculator
-# Version: 2.0.8
+# Version: 2.1.0
 # Author: Rodrigo Zeba + ChatGPT
 # License: MIT
+#
+# v2.1.0:
+# - Added preview zoom controls: Zoom -, Fit, 1:1 and Zoom +.
+# - Added mouse wheel zoom centered under the cursor.
+# - Improved pan behavior using QGraphicsView ScrollHandDrag.
+# - Preview only auto-fits on resize while in Fit mode.
 #
 # v2.0.8:
 # - Reworked layout for usability: left column for Input/Info, right area for Formulas/Preview.
@@ -60,7 +66,6 @@
 # Notes:
 # - Preview is display-only and uses a simple linked autostretch.
 # - The saved FITS is the composed/rescaled RGB result, not the preview image.
-VERSION = "2.0.8"
 
 import os
 import sys
@@ -95,7 +100,7 @@ from PyQt6.QtWidgets import (
 
 
 APP_NAME = "Normalize Channels Calculator"
-VERSION = "2.0.8"
+VERSION = "2.1.0"
 DEFAULT_OUTPUT = "normalized_SHO_result.fit"
 
 
@@ -250,12 +255,22 @@ def preview_qpixmap(rgb):
 class PreviewView(QGraphicsView):
     def __init__(self):
         super().__init__()
+
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+
         self.pixmap_item = None
+        self.fit_mode = True
+        self.zoom_step = 1.25
+        self.current_zoom = 1.0
+
         self.setBackgroundBrush(Qt.GlobalColor.darkGray)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Better zoom behavior: mouse wheel zooms around cursor position.
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
 
     def set_pixmap(self, pixmap):
         self.scene.clear()
@@ -264,13 +279,66 @@ class PreviewView(QGraphicsView):
         self.scene.setSceneRect(self.pixmap_item.boundingRect())
         self.fit_to_view()
 
+    def has_image(self):
+        return self.pixmap_item is not None
+
     def fit_to_view(self):
-        if self.pixmap_item is not None:
-            self.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+        if not self.has_image():
+            return
+
+        self.fit_mode = True
+        self.resetTransform()
+        self.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+        self.current_zoom = 1.0
+
+    def actual_size(self):
+        """Show the preview at 1 image pixel = 1 screen pixel."""
+        if not self.has_image():
+            return
+
+        self.fit_mode = False
+        self.resetTransform()
+        self.current_zoom = 1.0
+        self.centerOn(self.pixmap_item)
+
+    def zoom_in(self):
+        self._zoom(self.zoom_step)
+
+    def zoom_out(self):
+        self._zoom(1.0 / self.zoom_step)
+
+    def _zoom(self, factor):
+        if not self.has_image():
+            return
+
+        self.fit_mode = False
+        self.scale(factor, factor)
+        self.current_zoom *= factor
+
+    def wheelEvent(self, event):
+        if not self.has_image():
+            super().wheelEvent(event)
+            return
+
+        delta = event.angleDelta().y()
+        if delta == 0:
+            super().wheelEvent(event)
+            return
+
+        if delta > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+
+        event.accept()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.fit_to_view()
+
+        # Keep fitting only while in Fit mode. If the user zoomed manually,
+        # do not reset their zoom when the window is resized.
+        if self.fit_mode:
+            self.fit_to_view()
 
 
 class NormalizeChannelsWindow(QMainWindow):
@@ -483,8 +551,42 @@ class NormalizeChannelsWindow(QMainWindow):
         preview_layout.setContentsMargins(14, 12, 14, 12)
         preview_layout.setSpacing(8)
 
+        preview_header = QHBoxLayout()
+
         preview_label = QLabel("Preview")
-        preview_layout.addWidget(preview_label)
+        preview_header.addWidget(preview_label)
+        preview_header.addStretch(1)
+
+        self.zoom_out_btn = QPushButton("-")
+        self.zoom_out_btn.setObjectName("ToolButton")
+        self.zoom_out_btn.setFixedWidth(42)
+        self.zoom_out_btn.clicked.connect(lambda: self.preview.zoom_out())
+
+        self.fit_btn = QPushButton("Fit")
+        self.fit_btn.setObjectName("ToolButton")
+        self.fit_btn.setFixedWidth(56)
+        self.fit_btn.clicked.connect(lambda: self.preview.fit_to_view())
+
+        self.actual_size_btn = QPushButton("1:1")
+        self.actual_size_btn.setObjectName("ToolButton")
+        self.actual_size_btn.setFixedWidth(56)
+        self.actual_size_btn.clicked.connect(lambda: self.preview.actual_size())
+
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setObjectName("ToolButton")
+        self.zoom_in_btn.setFixedWidth(42)
+        self.zoom_in_btn.clicked.connect(lambda: self.preview.zoom_in())
+
+        preview_header.addWidget(self.zoom_out_btn)
+        preview_header.addWidget(self.fit_btn)
+        preview_header.addWidget(self.actual_size_btn)
+        preview_header.addWidget(self.zoom_in_btn)
+
+        self.pan_note = QLabel("(Mouse wheel zooms. Drag to pan when zoomed.)")
+        self.pan_note.setObjectName("ZoomNote")
+        preview_header.addWidget(self.pan_note)
+
+        preview_layout.addLayout(preview_header)
 
         self.preview = PreviewView()
         self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -525,6 +627,12 @@ class NormalizeChannelsWindow(QMainWindow):
             QLabel#SmallNote {
                 color: #c8c8c8;
                 font-size: 8pt;
+            }
+
+            QLabel#ZoomNote {
+                color: #f0b642;
+                font-size: 8pt;
+                font-style: italic;
             }
 
 
@@ -614,6 +722,24 @@ class NormalizeChannelsWindow(QMainWindow):
             QPushButton#SecondaryButton:pressed {
                 background-color: #254d83;
                 border: 1px solid #254d83;
+            }
+
+            QPushButton#ToolButton {
+                background-color: #3a3a3a;
+                border: 1px solid #666666;
+                color: #ffffff;
+                font-weight: 600;
+                padding: 5px;
+            }
+
+            QPushButton#ToolButton:hover {
+                background-color: #4a4a4a;
+                border: 1px solid #777777;
+            }
+
+            QPushButton#ToolButton:pressed {
+                background-color: #2d2d2d;
+                border: 1px solid #555555;
             }
 
             QCheckBox {
