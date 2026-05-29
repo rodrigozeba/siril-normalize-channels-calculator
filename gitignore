@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Siril / astronomy data
+*.fit
+*.fits
+*.fts
+*.ser
+*.seq
+
+# Generated outputs
+normalized_SHO_result.fit
+output/
+exports/
+
+# Logs / temp
+*.log
+*.tmp
