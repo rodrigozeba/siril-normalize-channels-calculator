@@ -25,7 +25,7 @@ A PyQt6 Python script for Siril that estimates narrowband SHO channel weights us
 2. Select Ha, SII and OIII mono FITS files.
 3. Choose a percentile, usually 90, 95 or 98.
 4. Click Calculate.
-5. Adjust formulas if needed.
+5. Adjust formulas if needed. (Suported operations: med() median() mean() min() max() abs() sqrt() log() log10() asinh() clip())
 6. Click Apply.
 7. The script creates `normalized_SHO_result.fit`.
 
