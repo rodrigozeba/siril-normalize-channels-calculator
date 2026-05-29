@@ -1,6 +1,8 @@
 # Normalize Channels Calculator for Siril
 
 A PyQt6 Python script for Siril that estimates narrowband SHO channel weights using median and percentile-based signal estimation.
+Recommended: use starless mono channels when possible.
+Bright stars can bias percentile-based signal estimates, especially P95/P98.
 
 ## Features
 
