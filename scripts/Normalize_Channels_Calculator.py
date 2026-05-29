@@ -1,7 +1,17 @@
 # Normalize Channels Calculator
-# Version: 2.1.0
+# Version: 2.2.3
 # Author: Rodrigo Zeba + ChatGPT
 # License: MIT
+#
+# v2.2.3:
+# - Compact visual adjustment: reduced main input/button heights.
+# - Reduced Calculate/Apply width so they no longer touch each other.
+# - Kept workflow buttons compact.
+#
+# v2.2.2:
+# - Added Copy Formulas, Reset Formulas and Save Report TXT buttons.
+# - Added starless-channel recommendation in the report.
+# - Removed visible output filename field from v2.2 to preserve layout.
 #
 # v2.1.0:
 # - Added preview zoom controls: Zoom -, Fit, 1:1 and Zoom +.
@@ -100,7 +110,7 @@ from PyQt6.QtWidgets import (
 
 
 APP_NAME = "Normalize Channels Calculator"
-VERSION = "2.1.0"
+VERSION = "2.2.3"
 DEFAULT_OUTPUT = "normalized_SHO_result.fit"
 
 
@@ -363,6 +373,7 @@ class NormalizeChannelsWindow(QMainWindow):
         self.weight_sii = None
         self.weight_oiii = None
         self.weight_ha = 0.70
+        self.last_calculated_formulas = {"r": "", "g": "", "b": ""}
 
         self.last_rgb = None
         self.last_output_path = ""
@@ -422,19 +433,19 @@ class NormalizeChannelsWindow(QMainWindow):
         input_layout.setHorizontalSpacing(10)
         input_layout.setVerticalSpacing(8)
         input_layout.setColumnStretch(1, 1)
-        input_layout.setColumnMinimumWidth(2, 112)
+        input_layout.setColumnMinimumWidth(2, 105)
 
         self.percentile_edit = QLineEdit("95")
-        self.percentile_edit.setMinimumHeight(30)
+        self.percentile_edit.setMinimumHeight(28)
         input_layout.addWidget(QLabel("Define the Percentile"), 0, 0, 1, 3)
         input_layout.addWidget(self.percentile_edit, 1, 0, 1, 3)
 
         self.ha_edit = QLineEdit()
         self.ha_edit.setReadOnly(True)
-        self.ha_edit.setMinimumHeight(30)
+        self.ha_edit.setMinimumHeight(28)
         self.ha_btn = QPushButton("Select Ha File")
         self.ha_btn.setObjectName("SecondaryButton")
-        self.ha_btn.setMinimumHeight(30)
+        self.ha_btn.setMinimumHeight(28)
         self.ha_btn.clicked.connect(self.select_ha)
         input_layout.addWidget(QLabel("Ha File"), 2, 0, 1, 3)
         input_layout.addWidget(self.ha_edit, 3, 0, 1, 2)
@@ -442,10 +453,10 @@ class NormalizeChannelsWindow(QMainWindow):
 
         self.sii_edit = QLineEdit()
         self.sii_edit.setReadOnly(True)
-        self.sii_edit.setMinimumHeight(30)
+        self.sii_edit.setMinimumHeight(28)
         self.sii_btn = QPushButton("Select SII File")
         self.sii_btn.setObjectName("SecondaryButton")
-        self.sii_btn.setMinimumHeight(30)
+        self.sii_btn.setMinimumHeight(28)
         self.sii_btn.clicked.connect(self.select_sii)
         input_layout.addWidget(QLabel("SII File"), 4, 0, 1, 3)
         input_layout.addWidget(self.sii_edit, 5, 0, 1, 2)
@@ -453,10 +464,10 @@ class NormalizeChannelsWindow(QMainWindow):
 
         self.oiii_edit = QLineEdit()
         self.oiii_edit.setReadOnly(True)
-        self.oiii_edit.setMinimumHeight(30)
+        self.oiii_edit.setMinimumHeight(28)
         self.oiii_btn = QPushButton("Select OIII File")
         self.oiii_btn.setObjectName("SecondaryButton")
-        self.oiii_btn.setMinimumHeight(30)
+        self.oiii_btn.setMinimumHeight(28)
         self.oiii_btn.clicked.connect(self.select_oiii)
         input_layout.addWidget(QLabel("OIII File"), 6, 0, 1, 3)
         input_layout.addWidget(self.oiii_edit, 7, 0, 1, 2)
@@ -506,9 +517,9 @@ class NormalizeChannelsWindow(QMainWindow):
         self.r_formula = QLineEdit()
         self.g_formula = QLineEdit()
         self.b_formula = QLineEdit()
-        self.r_formula.setMinimumHeight(30)
-        self.g_formula.setMinimumHeight(30)
-        self.b_formula.setMinimumHeight(30)
+        self.r_formula.setMinimumHeight(28)
+        self.g_formula.setMinimumHeight(28)
+        self.b_formula.setMinimumHeight(28)
 
         formula_layout.addWidget(QLabel("R / SII Formula"), 0, 0)
         formula_layout.addWidget(QLabel("G / Ha Formula"), 0, 1)
@@ -522,21 +533,42 @@ class NormalizeChannelsWindow(QMainWindow):
         self.rescale_check.setChecked(True)
         formula_layout.addWidget(self.rescale_check, 2, 0)
 
+        self.copy_formulas_btn = QPushButton("Copy formulas")
+        self.copy_formulas_btn.setObjectName("WorkflowButton")
+        self.copy_formulas_btn.setMinimumHeight(26)
+        self.copy_formulas_btn.setMinimumWidth(102)
+        self.copy_formulas_btn.clicked.connect(self.copy_formulas)
+
+        self.reset_formulas_btn = QPushButton("Reset formulas")
+        self.reset_formulas_btn.setObjectName("WorkflowButton")
+        self.reset_formulas_btn.setMinimumHeight(26)
+        self.reset_formulas_btn.setMinimumWidth(106)
+        self.reset_formulas_btn.clicked.connect(self.reset_formulas)
+
+        self.save_report_btn = QPushButton("Save report TXT")
+        self.save_report_btn.setObjectName("WorkflowButton")
+        self.save_report_btn.setMinimumHeight(26)
+        self.save_report_btn.setMinimumWidth(112)
+        self.save_report_btn.clicked.connect(self.save_report_txt)
+
         self.calculate_btn = QPushButton("Calculate")
         self.calculate_btn.setObjectName("PrimaryButton")
-        self.calculate_btn.setMinimumHeight(30)
-        self.calculate_btn.setMinimumWidth(160)
+        self.calculate_btn.setMinimumHeight(26)
+        self.calculate_btn.setMinimumWidth(92)
         self.calculate_btn.clicked.connect(self.calculate)
 
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.setObjectName("PrimaryButton")
-        self.apply_btn.setMinimumHeight(30)
-        self.apply_btn.setMinimumWidth(160)
+        self.apply_btn.setMinimumHeight(26)
+        self.apply_btn.setMinimumWidth(82)
         self.apply_btn.clicked.connect(self.apply)
 
         button_row = QHBoxLayout()
-        button_row.setSpacing(12)
+        button_row.setSpacing(10)
         button_row.addStretch(1)
+        button_row.addWidget(self.copy_formulas_btn)
+        button_row.addWidget(self.reset_formulas_btn)
+        button_row.addWidget(self.save_report_btn)
         button_row.addWidget(self.calculate_btn)
         button_row.addWidget(self.apply_btn)
 
@@ -662,12 +694,12 @@ class NormalizeChannelsWindow(QMainWindow):
                 color: #ffffff;
                 border: 1px solid #555555;
                 border-radius: 6px;
-                padding: 6px;
+                padding: 4px 6px;
                 selection-background-color: #0078d4;
             }
 
             QLineEdit {
-                min-height: 24px;
+                min-height: 22px;
             }
 
             QLineEdit:read-only {
@@ -679,8 +711,8 @@ class NormalizeChannelsWindow(QMainWindow):
                 color: #ffffff;
                 border: 1px solid #555555;
                 border-radius: 6px;
-                padding: 7px;
-                min-height: 24px;
+                padding: 5px 7px;
+                min-height: 22px;
             }
 
             QPushButton:hover {
@@ -696,6 +728,8 @@ class NormalizeChannelsWindow(QMainWindow):
                 border: 1px solid #0d6fd6;
                 color: #ffffff;
                 font-weight: 600;
+                padding-left: 8px;
+                padding-right: 8px;
             }
 
             QPushButton#PrimaryButton:hover {
@@ -738,6 +772,26 @@ class NormalizeChannelsWindow(QMainWindow):
             }
 
             QPushButton#ToolButton:pressed {
+                background-color: #2d2d2d;
+                border: 1px solid #555555;
+            }
+
+            QPushButton#WorkflowButton {
+                background-color: #3a3a3a;
+                border: 1px solid #666666;
+                color: #ffffff;
+                font-size: 8pt;
+                font-weight: 600;
+                padding: 3px;
+                min-height: 20px;
+            }
+
+            QPushButton#WorkflowButton:hover {
+                background-color: #4a4a4a;
+                border: 1px solid #777777;
+            }
+
+            QPushButton#WorkflowButton:pressed {
                 background-color: #2d2d2d;
                 border: 1px solid #555555;
             }
@@ -866,6 +920,12 @@ class NormalizeChannelsWindow(QMainWindow):
             self.g_formula.setText(f"(Ha - med(Ha)) * {self.weight_ha:.2f}")
             self.b_formula.setText(f"(OIII - med(OIII)) * {self.weight_oiii:.2f}")
 
+            self.last_calculated_formulas = {
+                "r": self.r_formula.text(),
+                "g": self.g_formula.text(),
+                "b": self.b_formula.text(),
+            }
+
             report = self._make_report(pct)
             self.info_text.setPlainText(report)
             self._log("Normalize Channels Calculator: calculation complete.")
@@ -929,7 +989,73 @@ Notes:
 - Apply uses the current text in the R/G/B formula fields, so manual edits are used.
 - Apply uses a simple global rescale after composition by default.
 - Preview uses a simple linked autostretch for display only.
+- Recommended: use starless mono channels when possible. Bright stars can bias percentile-based signal estimates, especially P95/P98.
 """
+
+    def _formula_text_block(self):
+        return (
+            f"R = {self.r_formula.text().strip()}\n"
+            f"G = {self.g_formula.text().strip()}\n"
+            f"B = {self.b_formula.text().strip()}"
+        )
+
+    def copy_formulas(self):
+        if not self.r_formula.text().strip() or not self.g_formula.text().strip() or not self.b_formula.text().strip():
+            self._show_error("Copy formulas", ValueError("Formula fields are empty. Click Calculate first or type formulas manually."))
+            return
+
+        QApplication.clipboard().setText(self._formula_text_block())
+        self.output_label.setText("Formulas copied to clipboard.")
+
+    def reset_formulas(self):
+        if not any(self.last_calculated_formulas.values()):
+            self._show_error("Reset formulas", ValueError("No calculated formulas available. Click Calculate first."))
+            return
+
+        self.r_formula.setText(self.last_calculated_formulas.get("r", ""))
+        self.g_formula.setText(self.last_calculated_formulas.get("g", ""))
+        self.b_formula.setText(self.last_calculated_formulas.get("b", ""))
+        self.output_label.setText("Formulas reset to last calculated values.")
+
+    def save_report_txt(self):
+        report = self.info_text.toPlainText().strip()
+
+        if not report:
+            self._show_error("Save report TXT", ValueError("Report is empty. Click Calculate first."))
+            return
+
+        default_name = "normalize_channels_report.txt"
+        try:
+            wd = self.siril.get_siril_wd()
+            if wd and os.path.isdir(wd):
+                default_path = os.path.join(wd, default_name)
+            else:
+                default_path = os.path.join(os.path.dirname(self.ha_path), default_name) if self.ha_path else default_name
+        except Exception:
+            default_path = default_name
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save report TXT",
+            default_path,
+            "Text files (*.txt);;All files (*.*)"
+        )
+
+        if not path:
+            return
+
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(report)
+            f.write("\n\n")
+            f.write("Current formulas:\n")
+            f.write(self._formula_text_block())
+            f.write("\n")
+
+        self.output_label.setText(f"Report saved: {path}")
+
 
     def _compose_rgb(self):
         if self.ha_fit is None or self.sii_fit is None or self.oiii_fit is None:
