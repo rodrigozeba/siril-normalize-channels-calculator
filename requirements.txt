@@ -1,2 +1,4 @@
-numpy
-PyQt6
+Siril 1.4+
+Python scripting enabled in Siril
+PyQt6 support in Siril's Python environment
+NumPy
