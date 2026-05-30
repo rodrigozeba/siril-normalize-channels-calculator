@@ -1,7 +1,13 @@
 # Normalize Channels Calculator
-# Version: 2.2.3
+# Version: 2.3.0
 # Author: Rodrigo Zeba + ChatGPT
 # License: MIT
+#
+# v2.3.0:
+# - Added percentile comparison for P90, P95 and P98.
+# - Added Use P90 / Use P95 / Use P98 buttons.
+# - Apply now saves automatic percentile-suffixed outputs such as normalized_SHO_result_p95.fit.
+# - Report now includes percentile comparison and interpretation.
 #
 # v2.2.3:
 # - Compact visual adjustment: reduced main input/button heights.
@@ -110,7 +116,7 @@ from PyQt6.QtWidgets import (
 
 
 APP_NAME = "Normalize Channels Calculator"
-VERSION = "2.2.3"
+VERSION = "2.3.0"
 DEFAULT_OUTPUT = "normalized_SHO_result.fit"
 
 
@@ -148,6 +154,48 @@ def calc_stats(data, percentile):
         "min": float(np.min(arr)),
         "max": float(np.max(arr)),
     }
+
+
+def calculate_percentile_result(ha_data, sii_data, oiii_data, percentile, ha_green_factor=0.70):
+    """Calculate medians, percentile signals and suggested SHO weights for one percentile."""
+    ha_stats = calc_stats(ha_data, percentile)
+    sii_stats = calc_stats(sii_data, percentile)
+    oiii_stats = calc_stats(oiii_data, percentile)
+
+    ha_sig = ha_stats["signal"]
+    sii_sig = sii_stats["signal"]
+    oiii_sig = oiii_stats["signal"]
+
+    if ha_sig <= 0 or sii_sig <= 0 or oiii_sig <= 0:
+        raise ValueError(
+            f"One or more channels have non-positive signal estimate for P{percentile:g}. "
+            "Try another percentile or inspect the channels."
+        )
+
+    weight_sii = safe_div(ha_sig, sii_sig)
+    weight_ha = ha_green_factor
+    weight_oiii = safe_div(ha_sig, oiii_sig)
+
+    return {
+        "percentile": float(percentile),
+        "ha_stats": ha_stats,
+        "sii_stats": sii_stats,
+        "oiii_stats": oiii_stats,
+        "weight_sii": weight_sii,
+        "weight_ha": weight_ha,
+        "weight_oiii": weight_oiii,
+        "r_formula": f"(SII - med(SII)) * {weight_sii:.2f}",
+        "g_formula": f"(Ha - med(Ha)) * {weight_ha:.2f}",
+        "b_formula": f"(OIII - med(OIII)) * {weight_oiii:.2f}",
+    }
+
+
+def percentile_label(percentile):
+    """Return a safe label like p90, p95, p98 or p92_5."""
+    value = float(percentile)
+    if value.is_integer():
+        return f"p{int(value)}"
+    return "p" + str(value).replace(".", "_")
 
 
 def safe_div(numerator, denominator):
@@ -374,6 +422,9 @@ class NormalizeChannelsWindow(QMainWindow):
         self.weight_oiii = None
         self.weight_ha = 0.70
         self.last_calculated_formulas = {"r": "", "g": "", "b": ""}
+        self.percentile_results = {}
+        self.selected_percentile_label = "custom"
+        self.selected_percentile_value = None
 
         self.last_rgb = None
         self.last_output_path = ""
@@ -503,8 +554,8 @@ class NormalizeChannelsWindow(QMainWindow):
 
         formula_panel = QWidget()
         formula_panel.setObjectName("Panel")
-        formula_panel.setMinimumHeight(145)
-        formula_panel.setMaximumHeight(170)
+        formula_panel.setMinimumHeight(175)
+        formula_panel.setMaximumHeight(205)
 
         formula_layout = QGridLayout(formula_panel)
         formula_layout.setContentsMargins(14, 12, 14, 12)
@@ -532,6 +583,24 @@ class NormalizeChannelsWindow(QMainWindow):
         self.rescale_check = QCheckBox("Global rescale output")
         self.rescale_check.setChecked(True)
         formula_layout.addWidget(self.rescale_check, 2, 0)
+
+        self.use_p90_btn = QPushButton("Use P90")
+        self.use_p90_btn.setObjectName("PercentileButton")
+        self.use_p90_btn.setMinimumHeight(24)
+        self.use_p90_btn.setMinimumWidth(72)
+        self.use_p90_btn.clicked.connect(lambda: self.use_percentile_result(90))
+
+        self.use_p95_btn = QPushButton("Use P95")
+        self.use_p95_btn.setObjectName("PercentileButton")
+        self.use_p95_btn.setMinimumHeight(24)
+        self.use_p95_btn.setMinimumWidth(72)
+        self.use_p95_btn.clicked.connect(lambda: self.use_percentile_result(95))
+
+        self.use_p98_btn = QPushButton("Use P98")
+        self.use_p98_btn.setObjectName("PercentileButton")
+        self.use_p98_btn.setMinimumHeight(24)
+        self.use_p98_btn.setMinimumWidth(72)
+        self.use_p98_btn.clicked.connect(lambda: self.use_percentile_result(98))
 
         self.copy_formulas_btn = QPushButton("Copy formulas")
         self.copy_formulas_btn.setObjectName("WorkflowButton")
@@ -563,6 +632,14 @@ class NormalizeChannelsWindow(QMainWindow):
         self.apply_btn.setMinimumWidth(82)
         self.apply_btn.clicked.connect(self.apply)
 
+        percentile_row = QHBoxLayout()
+        percentile_row.setSpacing(8)
+        percentile_row.addWidget(QLabel("Use weights:"))
+        percentile_row.addWidget(self.use_p90_btn)
+        percentile_row.addWidget(self.use_p95_btn)
+        percentile_row.addWidget(self.use_p98_btn)
+        percentile_row.addStretch(1)
+
         button_row = QHBoxLayout()
         button_row.setSpacing(10)
         button_row.addStretch(1)
@@ -572,7 +649,8 @@ class NormalizeChannelsWindow(QMainWindow):
         button_row.addWidget(self.calculate_btn)
         button_row.addWidget(self.apply_btn)
 
-        formula_layout.addLayout(button_row, 2, 1, 1, 2)
+        formula_layout.addLayout(percentile_row, 2, 1, 1, 2)
+        formula_layout.addLayout(button_row, 3, 0, 1, 3)
 
         right_col.addWidget(formula_panel, stretch=0)
 
@@ -796,6 +874,26 @@ class NormalizeChannelsWindow(QMainWindow):
                 border: 1px solid #555555;
             }
 
+            QPushButton#PercentileButton {
+                background-color: #2f5f9f;
+                border: 1px solid #2f5f9f;
+                color: #ffffff;
+                font-size: 8pt;
+                font-weight: 600;
+                padding: 3px;
+                min-height: 20px;
+            }
+
+            QPushButton#PercentileButton:hover {
+                background-color: #3670bd;
+                border: 1px solid #3670bd;
+            }
+
+            QPushButton#PercentileButton:pressed {
+                background-color: #254d83;
+                border: 1px solid #254d83;
+            }
+
             QCheckBox {
                 spacing: 6px;
             }
@@ -870,15 +968,20 @@ class NormalizeChannelsWindow(QMainWindow):
         return pct
 
     def _get_output_path(self):
+        # v2.3 uses percentile-suffixed outputs to make comparison easier.
+        label = self.selected_percentile_label or "custom"
+        base_name = os.path.splitext(DEFAULT_OUTPUT)[0]
+        output_filename = f"{base_name}_{label}.fit"
+
         try:
             wd = self.siril.get_siril_wd()
             if wd and os.path.isdir(wd):
-                return os.path.join(wd, DEFAULT_OUTPUT)
+                return os.path.join(wd, output_filename)
         except Exception:
             pass
 
         folder = os.path.dirname(self.ha_path) if self.ha_path else os.getcwd()
-        return os.path.join(folder, DEFAULT_OUTPUT)
+        return os.path.join(folder, output_filename)
 
     def calculate(self):
         try:
@@ -898,27 +1001,34 @@ class NormalizeChannelsWindow(QMainWindow):
                     f"Ha: {ha_data.shape}\nSII: {sii_data.shape}\nOIII: {oiii_data.shape}"
                 )
 
-            self.ha_stats = calc_stats(ha_data, pct)
-            self.sii_stats = calc_stats(sii_data, pct)
-            self.oiii_stats = calc_stats(oiii_data, pct)
+            # Calculate the user-selected percentile plus comparison presets.
+            self.percentile_results = {}
 
-            ha_sig = self.ha_stats["signal"]
-            sii_sig = self.sii_stats["signal"]
-            oiii_sig = self.oiii_stats["signal"]
+            percentiles_to_compute = [90, 95, 98]
+            if pct not in percentiles_to_compute:
+                percentiles_to_compute.append(pct)
 
-            if ha_sig <= 0 or sii_sig <= 0 or oiii_sig <= 0:
-                raise ValueError(
-                    "One or more channels have non-positive signal estimate. "
-                    "Try a different percentile or inspect the channels."
+            for p in percentiles_to_compute:
+                self.percentile_results[float(p)] = calculate_percentile_result(
+                    ha_data, sii_data, oiii_data, p, self.weight_ha
                 )
 
-            self.weight_sii = safe_div(ha_sig, sii_sig)
-            self.weight_oiii = safe_div(ha_sig, oiii_sig)
-            self.weight_ha = 0.70
+            selected_result = self.percentile_results[float(pct)]
 
-            self.r_formula.setText(f"(SII - med(SII)) * {self.weight_sii:.2f}")
-            self.g_formula.setText(f"(Ha - med(Ha)) * {self.weight_ha:.2f}")
-            self.b_formula.setText(f"(OIII - med(OIII)) * {self.weight_oiii:.2f}")
+            self.ha_stats = selected_result["ha_stats"]
+            self.sii_stats = selected_result["sii_stats"]
+            self.oiii_stats = selected_result["oiii_stats"]
+
+            self.weight_sii = selected_result["weight_sii"]
+            self.weight_ha = selected_result["weight_ha"]
+            self.weight_oiii = selected_result["weight_oiii"]
+
+            self.r_formula.setText(selected_result["r_formula"])
+            self.g_formula.setText(selected_result["g_formula"])
+            self.b_formula.setText(selected_result["b_formula"])
+
+            self.selected_percentile_value = float(pct)
+            self.selected_percentile_label = percentile_label(pct)
 
             self.last_calculated_formulas = {
                 "r": self.r_formula.text(),
@@ -934,9 +1044,27 @@ class NormalizeChannelsWindow(QMainWindow):
             self._show_error("Calculate error", e)
 
     def _make_report(self, pct):
-        ha = self.ha_stats
-        sii = self.sii_stats
-        oiii = self.oiii_stats
+        selected = self.percentile_results.get(float(pct))
+        if selected is None:
+            raise ValueError(f"No percentile result found for P{pct:g}.")
+
+        ha = selected["ha_stats"]
+        sii = selected["sii_stats"]
+        oiii = selected["oiii_stats"]
+
+        comparison_lines = []
+        for p in [90, 95, 98]:
+            result = self.percentile_results.get(float(p))
+            if result is None:
+                continue
+            comparison_lines.append(
+                f"P{p} suggested weights:\n"
+                f"R / SII:  {result['weight_sii']:.3f}\n"
+                f"G / Ha:   {result['weight_ha']:.3f}  (artistic green reduction)\n"
+                f"B / OIII: {result['weight_oiii']:.3f}\n"
+            )
+
+        comparison_text = "\n".join(comparison_lines)
 
         return f"""Normalize Channels Calculator v{VERSION}
 
@@ -945,7 +1073,8 @@ Ha:   {self.ha_path}
 SII:  {self.sii_path}
 OIII: {self.oiii_path}
 
-Percentile: P{pct:.1f}
+Selected percentile: P{pct:.1f}
+Selected output suffix: _{self.selected_percentile_label}
 
 === Ha ===
 Median: {fmt(ha['median'], 10)}
@@ -971,15 +1100,22 @@ Mean:   {fmt(oiii['mean'], 10)}
 Min:    {fmt(oiii['min'], 10)}
 Max:    {fmt(oiii['max'], 10)}
 
-=== Suggested SHO weights ===
-R / SII:  {self.weight_sii:.3f}
-G / Ha:   {self.weight_ha:.3f}  (artistic green reduction)
-B / OIII: {self.weight_oiii:.3f}
+=== Selected suggested SHO weights ===
+R / SII:  {selected['weight_sii']:.3f}
+G / Ha:   {selected['weight_ha']:.3f}  (artistic green reduction)
+B / OIII: {selected['weight_oiii']:.3f}
 
-=== Suggested Pixel Math formulas ===
-R = (SII - med(SII)) * {self.weight_sii:.2f}
-G = (Ha - med(Ha)) * {self.weight_ha:.2f}
-B = (OIII - med(OIII)) * {self.weight_oiii:.2f}
+=== Selected Pixel Math formulas ===
+R = {selected['r_formula']}
+G = {selected['g_formula']}
+B = {selected['b_formula']}
+
+=== Percentile comparison ===
+{comparison_text}
+Interpretation:
+- P90 is more conservative and less affected by bright structures/residual stars.
+- P95 is the balanced default starting point.
+- P98 is more aggressive, but can be biased by bright stars, highlights or star-removal artifacts.
 
 Notes:
 - Median is used as an estimated background pedestal.
@@ -991,6 +1127,40 @@ Notes:
 - Preview uses a simple linked autostretch for display only.
 - Recommended: use starless mono channels when possible. Bright stars can bias percentile-based signal estimates, especially P95/P98.
 """
+
+    def use_percentile_result(self, percentile):
+        if not self.percentile_results:
+            self._show_error("Use percentile", ValueError("No percentile results available. Click Calculate first."))
+            return
+
+        result = self.percentile_results.get(float(percentile))
+        if result is None:
+            self._show_error("Use percentile", ValueError(f"P{percentile:g} was not calculated. Click Calculate first."))
+            return
+
+        self.r_formula.setText(result["r_formula"])
+        self.g_formula.setText(result["g_formula"])
+        self.b_formula.setText(result["b_formula"])
+
+        self.ha_stats = result["ha_stats"]
+        self.sii_stats = result["sii_stats"]
+        self.oiii_stats = result["oiii_stats"]
+
+        self.weight_sii = result["weight_sii"]
+        self.weight_ha = result["weight_ha"]
+        self.weight_oiii = result["weight_oiii"]
+
+        self.selected_percentile_value = float(percentile)
+        self.selected_percentile_label = percentile_label(percentile)
+
+        self.last_calculated_formulas = {
+            "r": self.r_formula.text(),
+            "g": self.g_formula.text(),
+            "b": self.b_formula.text(),
+        }
+
+        self.info_text.setPlainText(self._make_report(float(percentile)))
+        self.output_label.setText(f"Using P{percentile:g} weights. Apply will save with suffix _{self.selected_percentile_label}.")
 
     def _formula_text_block(self):
         return (
