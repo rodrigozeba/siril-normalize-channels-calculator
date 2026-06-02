@@ -1,7 +1,22 @@
 # Normalize Channels Calculator
-# Version: 2.3.0
+# Version: 2.4.1
 # Author: Rodrigo Zeba + ChatGPT
 # License: MIT
+#
+# v2.4.1:
+# - Removed Asinh preview slider for better responsiveness.
+# - Moved Preview Stretch and Reset Preview Stretch to the preview header row.
+# - Rebalanced preview stretch presets:
+#   Conservative = weaker stretch
+#   Normal = previous Conservative
+#   Aggressive = previous Normal
+# - Saved FITS remains unaffected by preview stretch settings.
+#
+# v2.4.0:
+# - Added preview stretch controls: Conservative / Normal / Aggressive.
+# - Added Asinh strength slider for preview only.
+# - Added Reset preview stretch button.
+# - Saved FITS remains unaffected by preview stretch settings.
 #
 # v2.3.0:
 # - Added percentile comparison for P90, P95 and P98.
@@ -95,6 +110,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -116,7 +132,7 @@ from PyQt6.QtWidgets import (
 
 
 APP_NAME = "Normalize Channels Calculator"
-VERSION = "2.3.0"
+VERSION = "2.4.1"
 DEFAULT_OUTPUT = "normalized_SHO_result.fit"
 
 
@@ -277,7 +293,16 @@ def evaluate_formula(expr, ha, sii, oiii, label):
     return arr
 
 
-def preview_qpixmap(rgb):
+def preview_qpixmap(rgb, stretch_preset="Normal"):
+    """
+    Create a QPixmap preview.
+    This preview stretch is display-only and does not affect the saved FITS.
+
+    Presets:
+        Conservative: weaker stretch, best for protecting highlights and inspecting background.
+        Normal: previous Conservative preset.
+        Aggressive: previous Normal preset, reveals more faint signal and noise.
+    """
     arr = np.asarray(rgb, dtype=np.float64)
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -285,16 +310,36 @@ def preview_qpixmap(rgb):
     if finite.size == 0:
         return None
 
-    lo = float(np.percentile(finite, 0.5))
-    hi = float(np.percentile(finite, 99.7))
+    preset = (stretch_preset or "Normal").lower()
+
+    if preset == "conservative":
+        # New softer preset: less aggressive than the old Conservative.
+        low_pct = 0.1
+        high_pct = 99.95
+        gamma = 1.0 / 1.8
+    elif preset == "aggressive":
+        # Old Normal.
+        low_pct = 0.5
+        high_pct = 99.7
+        gamma = 1.0 / 2.2
+    else:
+        # Old Conservative.
+        low_pct = 0.3
+        high_pct = 99.9
+        gamma = 1.0 / 2.0
+
+    lo = float(np.percentile(finite, low_pct))
+    hi = float(np.percentile(finite, high_pct))
+
     if hi <= lo:
         lo = float(np.min(finite))
         hi = float(np.max(finite))
+
     if hi <= lo:
         return None
 
     disp = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
-    disp = np.power(disp, 1.0 / 2.2)
+    disp = np.power(disp, gamma)
     disp8 = (disp * 255.0).clip(0, 255).astype(np.uint8)
 
     if disp8.ndim == 3 and disp8.shape[0] == 3:
@@ -308,7 +353,6 @@ def preview_qpixmap(rgb):
     bytes_per_line = 3 * w
     qimg = QImage(disp8.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
-
 
 class PreviewView(QGraphicsView):
     def __init__(self):
@@ -429,9 +473,11 @@ class NormalizeChannelsWindow(QMainWindow):
         self.last_rgb = None
         self.last_output_path = ""
 
+        self.preview_stretch_preset = "Normal"
+
         self.setWindowTitle(f"{APP_NAME} - v{VERSION}")
-        self.resize(1240, 760)
-        self.setMinimumSize(1120, 700)
+        self.resize(1240, 790)
+        self.setMinimumSize(1120, 730)
 
         self._build_ui()
         self._apply_dark_style()
@@ -667,6 +713,21 @@ class NormalizeChannelsWindow(QMainWindow):
         preview_header.addWidget(preview_label)
         preview_header.addStretch(1)
 
+        preview_header.addWidget(QLabel("Preview stretch"))
+
+        self.preview_stretch_combo = QComboBox()
+        self.preview_stretch_combo.addItems(["Conservative", "Normal", "Aggressive"])
+        self.preview_stretch_combo.setCurrentText("Normal")
+        self.preview_stretch_combo.setToolTip("Display-only stretch. It does not affect the saved FITS.")
+        self.preview_stretch_combo.currentTextChanged.connect(self.update_preview_from_controls)
+        preview_header.addWidget(self.preview_stretch_combo)
+
+        self.reset_preview_stretch_btn = QPushButton("Reset")
+        self.reset_preview_stretch_btn.setObjectName("ToolButton")
+        self.reset_preview_stretch_btn.setFixedWidth(62)
+        self.reset_preview_stretch_btn.clicked.connect(self.reset_preview_stretch)
+        preview_header.addWidget(self.reset_preview_stretch_btn)
+
         self.zoom_out_btn = QPushButton("-")
         self.zoom_out_btn.setObjectName("ToolButton")
         self.zoom_out_btn.setFixedWidth(42)
@@ -703,7 +764,7 @@ class NormalizeChannelsWindow(QMainWindow):
         self.preview.setMinimumHeight(420)
         preview_layout.addWidget(self.preview, stretch=1)
 
-        self.preview_note = QLabel("Preview uses simple linked autostretch for display only.")
+        self.preview_note = QLabel("Preview stretch affects display only. Saved FITS remains the composed/rescaled RGB result.")
         self.preview_note.setObjectName("SmallNote")
         preview_layout.addWidget(self.preview_note)
 
@@ -767,7 +828,7 @@ class NormalizeChannelsWindow(QMainWindow):
                 color: #ffffff;
             }
 
-            QLineEdit, QTextEdit {
+            QLineEdit, QTextEdit, QComboBox {
                 background-color: #3f3f3f;
                 color: #ffffff;
                 border: 1px solid #555555;
@@ -893,6 +954,8 @@ class NormalizeChannelsWindow(QMainWindow):
                 background-color: #254d83;
                 border: 1px solid #254d83;
             }
+
+
 
             QCheckBox {
                 spacing: 6px;
@@ -1124,7 +1187,7 @@ Notes:
 - Ha is reduced because in SHO it maps to green and often dominates visually.
 - Apply uses the current text in the R/G/B formula fields, so manual edits are used.
 - Apply uses a simple global rescale after composition by default.
-- Preview uses a simple linked autostretch for display only.
+- Preview stretch controls affect display only; the saved FITS is not stretched by these controls.
 - Recommended: use starless mono channels when possible. Bright stars can bias percentile-based signal estimates, especially P95/P98.
 """
 
@@ -1248,6 +1311,36 @@ Notes:
 
         return rgb.astype(np.float32)
 
+    def update_preview_from_controls(self):
+        if hasattr(self, "preview_stretch_combo"):
+            self.preview_stretch_preset = self.preview_stretch_combo.currentText()
+
+        if self.last_rgb is not None:
+            self.refresh_preview()
+
+    def reset_preview_stretch(self):
+        if hasattr(self, "preview_stretch_combo"):
+            self.preview_stretch_combo.setCurrentText("Normal")
+
+        self.preview_stretch_preset = "Normal"
+
+        if self.last_rgb is not None:
+            self.refresh_preview()
+
+        self.output_label.setText("Preview stretch reset to Normal.")
+
+    def refresh_preview(self):
+        if self.last_rgb is None:
+            return
+
+        pixmap = preview_qpixmap(
+            self.last_rgb,
+            stretch_preset=self.preview_stretch_preset,
+        )
+
+        if pixmap is not None:
+            self.preview.set_pixmap(pixmap)
+
     def apply(self):
         try:
             if not self.r_formula.text().strip() or not self.g_formula.text().strip() or not self.b_formula.text().strip():
@@ -1285,10 +1378,8 @@ Notes:
             except Exception as load_error:
                 self._log(f"Could not automatically open output FITS in Siril: {load_error}", level="warning")
 
-            pixmap = preview_qpixmap(rgb)
-            if pixmap is not None:
-                self.preview.set_pixmap(pixmap)
-            else:
+            self.refresh_preview()
+            if self.last_rgb is not None and self.preview.pixmap_item is None:
                 self.output_label.setText("Result saved. Preview unavailable, but FITS was created.")
 
             self.output_label.setText(
